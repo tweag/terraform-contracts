@@ -231,7 +231,7 @@
               , packages ? [ ]
               ,
               }:
-              args: pkgs.mkShell {
+              pkgs.mkShell {
                 buildInputs = lib.attrValues
                   (pkgs.callPackage ./nix/devshell.nix
                     {
