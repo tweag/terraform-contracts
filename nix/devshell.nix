@@ -30,6 +30,6 @@ in
   run-terraform = writeShellScriptBin "run-terraform" ''
     set -e
     run-nickel
-    ${terraform-with-plugins}/bin/terraform "$@"
+    ${lib.getExe terraform-with-plugins} "$@"
   '';
 }

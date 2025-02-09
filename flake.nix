@@ -113,13 +113,13 @@
 
           terraformProviders = pkgs.terraform-providers.actualProviders;
 
-          release = pkgs.runCommand "release-tarball"
+          getRelease = terraform: pkgs.runCommand "release-tarball"
             {
               nativeBuildInputs = [ pkgs.pixz ];
             } ''
             mkdir -p $out
             mkdir tf-ncl
-            ${lib.concatLines (lib.flip lib.mapAttrsToList inputs.self.schemas.${system} (provider: schema: ''
+            ${lib.concatLines (lib.flip lib.mapAttrsToList (getSchemas terraform) (provider: schema: ''
               cp ${schema} tf-ncl/${provider}.ncl
             ''))}
             tar --sort=name --mtime='@1' --owner=0 --group=0 --numeric-owner -c tf-ncl/*.ncl | pixz -t > $out/tf-ncl.tar.xz
@@ -139,10 +139,9 @@
             set -e -x
             ${lib.concatMapStringsSep "\n" (tmpl: "${test-single-example tmpl}") (lib.attrNames self.templates)}
           '';
-        in
-        {
-          checks =
-            self.schemas.${system} //
+
+          getChecks = terraform:
+            (getSchemas terraform) //
             (lib.mapAttrs'
               (name: drv: lib.nameValuePair "check-${name}" (
                 let
@@ -167,39 +166,78 @@
                   ${inputs.nickel.packages.${system}.default}/bin/nickel export ${conf} > $out
                 ''
               ))
-              self.schemas.${system}) //
+              (getSchemas terraform)) //
             {
               inherit tf-ncl schema-merge pre-commit;
             };
 
-          packages = {
+          getPackages = terraform: {
             default = tf-ncl;
-            terraform = pkgs.terraform;
-            inherit tf-ncl schema-merge release test-examples;
-          } // lib.mapAttrs' (name: value: lib.nameValuePair "schema-${name}" value) self.schemas.${system};
+            inherit terraform tf-ncl schema-merge test-examples;
+            release = getRelease terraform;
+          } // lib.mapAttrs' (name: value: lib.nameValuePair "schema-${name}" value) (getSchemas terraform);
 
+          generateJsonSchema = terraform: providerFn: pkgs.callPackage
+            (import ./nix/terraform_schema.nix (providerFn terraformProviders))
+            { inherit terraform; inherit (getPackages terraform) schema-merge; };
+
+          generateSchema = terraform: providerFn: pkgs.callPackage
+            ./nix/nickel_schema.nix
+            { jsonSchema = (generateJsonSchema terraform) providerFn; inherit (getPackages terraform) tf-ncl; };
+
+          getSchemas = terraform: lib.mapAttrs
+            (name: p: (generateSchema terraform) (_: { ${name} = p; }))
+            terraformProviders;
+
+          getDevShell = terraform: pkgs.mkShell {
+            inputsFrom = builtins.attrValues (getChecks terraform);
+            buildInputs = [ terraform ] ++ (with pkgs; [
+              cargo
+              rustc
+              inputs.nickel.packages.${system}.default
+              rust-analyzer
+              rustfmt
+              clippy
+              nixpkgs-fmt
+              inputs.topiary.packages.${system}.default
+
+              go
+              gopls
+              gotools
+              go-tools
+              gofumpt
+            ]);
+            shellHook = ''
+              ${pre-commit.shellHook}
+            '';
+          };
+
+          tf = {
+            inherit (pkgs) terraform opentofu;
+          };
+        in
+        {
           inherit terraformProviders;
 
-          generateJsonSchema = providerFn: pkgs.callPackage
-            (import ./nix/terraform_schema.nix (providerFn terraformProviders))
-            { inherit (self.packages.${system}) schema-merge; };
+          packages = getPackages tf.opentofu;
 
-          generateSchema = providerFn: pkgs.callPackage
-            ./nix/nickel_schema.nix
-            { jsonSchema = self.generateJsonSchema.${system} providerFn; inherit (self.packages.${system}) tf-ncl; };
-
-          schemas = lib.mapAttrs
-            (name: p: self.generateSchema.${system} (_: { ${name} = p; }))
-            terraformProviders;
+          checks = getChecks tf.opentofu;
 
           lib = {
             mkDevShell =
-              { providers, extraNickelInput ? "", packages ? [ ] }: pkgs.mkShell {
+              { providers
+              , extraNickelInput ? ""
+              , terraform ? tf.opentofu
+              , packages ? [ ]
+              ,
+              }:
+              pkgs.mkShell {
                 buildInputs = lib.attrValues
                   (pkgs.callPackage ./nix/devshell.nix
                     {
-                      generateSchema = self.generateSchema.${system};
+                      generateSchema = generateSchema terraform;
                       nickel = inputs.nickel.packages.${system}.nickel-lang-cli;
+                      inherit terraform;
                     }
                     { inherit providers extraNickelInput; }) ++ packages ++ [
                   inputs.nickel.packages.${system}.default
@@ -215,28 +253,10 @@
               };
           };
 
-          devShells.default = pkgs.mkShell {
-            inputsFrom = builtins.attrValues self.checks;
-            buildInputs = with pkgs; [
-              cargo
-              rustc
-              terraform
-              inputs.nickel.packages.${system}.default
-              rust-analyzer
-              rustfmt
-              clippy
-              nixpkgs-fmt
-              inputs.topiary.packages.${system}.default
-
-              go
-              gopls
-              gotools
-              go-tools
-              gofumpt
-            ];
-            shellHook = ''
-              ${pre-commit.shellHook}
-            '';
+          devShells = rec {
+            terraform = getDevShell tf.terraform;
+            opentofu = getDevShell tf.opentofu;
+            default = opentofu;
           };
         }) // {
       templates = rec {

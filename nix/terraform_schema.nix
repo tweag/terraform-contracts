@@ -18,8 +18,8 @@ let
     in
     runCommand "${name}.json" { } ''
       cp ${mainJson} main.tf.json
-      ${terraform-with-plugins}/bin/terraform init
-      ${terraform-with-plugins}//bin/terraform providers schema -json >$out
+      ${lib.getExe terraform-with-plugins} init
+      ${lib.getExe terraform-with-plugins} providers schema -json >$out
     '';
 
   providersJson = (formats.json { }).generate "providers.json" (required_providers providers);
