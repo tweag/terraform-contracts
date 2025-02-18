@@ -1,13 +1,14 @@
 use clap::Parser;
 use core::fmt;
-use pretty::{BoxAllocator, BoxDoc, Pretty};
+use nickel_lang_core::pretty::Allocator;
+use pretty::{BoxDoc, Pretty};
 use serde::Deserialize;
 use std::{
     io::{self, stdout, Read},
     path::PathBuf,
 };
 use tf_ncl::{
-    intermediate::{GoSchema, IntoWithProviders, Providers, WithProviders},
+    intermediate::{GoSchema, IntoWithProviders, Providers},
     nickel::AsNickel,
 };
 
@@ -71,15 +72,6 @@ impl<'a> RenderableSchema<'a> {
     }
 }
 
-impl<'a> From<WithProviders<GoSchema>> for RenderableSchema<'a> {
-    fn from(s: WithProviders<GoSchema>) -> Self {
-        RenderableSchema {
-            schema: s.as_nickel().pretty(&BoxAllocator).into_doc(),
-            providers: s.providers.as_nickel().pretty(&BoxAllocator).into_doc(),
-        }
-    }
-}
-
 struct Display<'a, 'b>(&'b BoxDoc<'a>);
 
 impl<'a, 'b> fmt::Display for Display<'a, 'b> {
@@ -94,7 +86,16 @@ fn main() -> anyhow::Result<()> {
     let providers = get_providers(&opts)?;
     let go_schema = get_schema(&opts)?.push_down_computed_fields();
 
-    let doc: RenderableSchema = go_schema.with_providers(providers).into();
+    let alloc = Allocator::default();
+    let with_providers = go_schema.with_providers(providers);
+    let doc = RenderableSchema {
+        schema: with_providers.as_nickel().pretty(&alloc).into_doc(),
+        providers: with_providers
+            .providers
+            .as_nickel()
+            .pretty(&alloc)
+            .into_doc(),
+    };
 
     doc.render(&mut stdout())
 }

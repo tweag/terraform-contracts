@@ -3,6 +3,3 @@ default-members = ["tf-ncl"]
 members = [
   "tf-ncl",
 ]
-
-[patch.crates-io]
-nickel-lang-core = { git = "https://github.com/tweag/nickel" }

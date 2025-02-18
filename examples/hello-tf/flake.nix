@@ -1,7 +1,5 @@
 {
   inputs = {
-    nixpkgs.url = "nixpkgs/nixos-unstable";
-    nickel.url = "github:tweag/nickel";
     tf-ncl.url = "github:tweag/tf-ncl";
     utils.url = "github:numtide/flake-utils";
   };

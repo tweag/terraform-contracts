@@ -1,10 +1,12 @@
-use std::rc::Rc;
-
 use crate::intermediate::{self, FieldDescriptor, GoSchema, Providers, WithProviders};
-use crate::nickel_builder::{self as builder, Type};
-use nickel_lang_core::term::array::{Array, ArrayAttrs};
-use nickel_lang_core::term::{MergePriority, RichTerm, Term};
-use nickel_lang_core::typ::{DictTypeFlavour, TypeF};
+use nickel_lang_core::{
+    term::{
+        array::{Array, ArrayAttrs},
+        make::builder,
+        MergePriority, RichTerm, Term,
+    },
+    typ::{DictTypeFlavour, Type, TypeF},
+};
 
 pub trait AsNickel {
     fn as_nickel(&self) -> RichTerm;
@@ -39,14 +41,12 @@ impl AsNickel for Providers {
 impl AsNickel for Vec<String> {
     fn as_nickel(&self) -> RichTerm {
         Term::Array(
-            Array::new(
+            Array::from(
                 self.iter()
                     .map(|s| RichTerm::from(Term::Str(s.into())))
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice()
-                    .into(),
+                    .collect(),
             ),
-            ArrayAttrs::new(),
+            ArrayAttrs::default(),
         )
         .into()
     }
@@ -55,14 +55,8 @@ impl AsNickel for Vec<String> {
 impl AsNickel for Vec<FieldDescriptor> {
     fn as_nickel(&self) -> RichTerm {
         Term::Array(
-            Array::new(
-                self.iter()
-                    .map(|x| x.as_nickel())
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice()
-                    .into(),
-            ),
-            ArrayAttrs::new(),
+            self.iter().map(|x| x.as_nickel()).collect(),
+            ArrayAttrs::default(),
         )
         .into()
     }
@@ -82,13 +76,10 @@ impl AsNickel for FieldDescriptor {
             .value(priority)
             .field("path")
             .value(Term::Array(
-                Array::new(Rc::from(
-                    self.path
-                        .iter()
-                        .map(|s| RichTerm::from(Term::Str(s.into())))
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice(),
-                )),
+                self.path
+                    .iter()
+                    .map(|s| RichTerm::from(Term::Str(s.into())))
+                    .collect(),
                 ArrayAttrs::default(),
             ))
             .build()
@@ -159,10 +150,7 @@ impl AsNickelContracts for &intermediate::Type {
         use intermediate::Type::*;
         use nickel_lang_core::mk_app;
         fn tfvar(inner: impl Into<RichTerm>) -> Type {
-            Type(TypeF::Flat(mk_app!(
-                Term::Var("TfNcl.Tf".into()),
-                inner.into()
-            )))
+            TypeF::Contract(mk_app!(Term::Var("TfNcl.Tf".into()), inner.into())).into()
         }
 
         fn primitive(inner: PrimitiveType) -> (Type, Option<Type>) {
@@ -181,13 +169,11 @@ impl AsNickelContracts for &intermediate::Type {
                 max: _,
                 content,
             } => (
-                Type(TypeF::Array(Box::new(
-                    content.as_ref().as_nickel_contracts().0,
-                ))),
+                TypeF::Array(Box::new(content.as_ref().as_nickel_contracts().0)).into(),
                 None,
             ),
             Object { open, content } => (
-                Type(TypeF::Flat(
+                TypeF::Contract(
                     builder::Record::from(
                         content
                             .iter()
@@ -195,7 +181,8 @@ impl AsNickelContracts for &intermediate::Type {
                     )
                     .set_open(*open)
                     .into(),
-                )),
+                )
+                .into(),
                 None,
             ),
             Dictionary {
@@ -203,17 +190,21 @@ impl AsNickelContracts for &intermediate::Type {
                 prefix,
                 computed_fields,
             } => {
-                let inner_contract = Type(TypeF::Dict {
+                let inner_contract = TypeF::Dict {
                     type_fields: Box::new(inner.as_ref().as_nickel_contracts().0),
                     flavour: DictTypeFlavour::Contract,
-                });
+                }
+                .into();
                 (
                     inner_contract,
-                    Some(Type(TypeF::Flat(mk_app!(
-                        Term::Var("TfNcl.ComputedFields".into()),
-                        prefix.as_nickel(),
-                        computed_fields.as_nickel()
-                    )))),
+                    Some(
+                        TypeF::Contract(mk_app!(
+                            Term::Var("TfNcl.ComputedFields".into()),
+                            prefix.as_nickel(),
+                            computed_fields.as_nickel()
+                        ))
+                        .into(),
+                    ),
                 )
             }
         }
